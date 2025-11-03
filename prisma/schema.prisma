@@ -1,0 +1,111 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+  // 建议用默认输出目录，保持这一行即可；如果你坚持自定义，就保留 output
+  // output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider     = "postgresql"
+  url          = env("DATABASE_URL")
+  relationMode = "foreignKeys"
+}
+
+/// 业务模型（最小可用集）
+/// 学生 -> 评价(对老师、可选课程/学期)，老师不登录
+model Student {
+  id        String   @id @default(cuid())
+  studentNo String   @unique // 学号或统一身份标识
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  reviews   Review[]
+}
+
+model Teacher {
+  id        String   @id @default(cuid())
+  name      String
+  dept      String?
+  // 可选：工号
+  teacherNo String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  reviews   Review[]
+  courses   Course[] // 授课关联
+}
+
+model Course {
+  id        String           @id @default(cuid())
+  code      String?          @unique
+  name      String
+  dept      String?
+  offerings CourseOffering[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  teacherId String
+  teacher   Teacher          @relation(fields: [teacherId], references: [id])
+  reviews   Review[]
+}
+
+model Term {
+  id        String           @id @default(cuid())
+  name      String // 例如 2025春
+  year      Int
+  season    String // spring/fall 等
+  startDate DateTime?
+  endDate   DateTime?
+  reviews   Review[]
+  courses   CourseOffering[]
+
+  @@unique([year, season])
+}
+
+/// 课程开课（某学期某课程）
+model CourseOffering {
+  id       String   @id @default(cuid())
+  courseId String
+  course   Course   @relation(fields: [courseId], references: [id])
+  termId   String
+  term     Term     @relation(fields: [termId], references: [id])
+  // 可按需增加班级号、上课时间地点等
+  reviews  Review[]
+
+  @@unique([courseId, termId])
+}
+
+/// 学生对老师（可选：对课程/开课）的评分+评论
+model Review {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id])
+
+  teacherId String
+  teacher   Teacher @relation(fields: [teacherId], references: [id])
+
+  // 可不选，但建议至少绑定 Course 或 CourseOffering 之一，便于统计
+  courseId String?
+  course   Course? @relation(fields: [courseId], references: [id])
+
+  offeringId String?
+  offering   CourseOffering? @relation(fields: [offeringId], references: [id])
+
+  termId String? // 如果未绑定 offering，也可以直接记录 term
+  term   Term?   @relation(fields: [termId], references: [id])
+
+  // 评分维度：1-5（允许小数）
+  overall    Decimal  @db.Decimal(2, 1)
+  clarity    Decimal? @db.Decimal(2, 1)
+  engagement Decimal? @db.Decimal(2, 1)
+  fairness   Decimal? @db.Decimal(2, 1)
+  workload   Decimal? @db.Decimal(2, 1)
+
+  comment     String?
+  isAnonymous Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  // 防刷：一个学生对 同一老师+同一学期 只允许一条（可按需放宽到同一门课）
+  @@unique([studentId, teacherId, termId])
+  @@index([teacherId])
+  @@index([courseId])
+  @@index([offeringId])
+}
